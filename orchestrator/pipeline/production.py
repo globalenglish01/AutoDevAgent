@@ -10,6 +10,7 @@ from pathlib import Path
 from langchain_core.language_models import BaseChatModel
 
 from orchestrator.agents.code.agent import build_code_agent
+from orchestrator.agents.code.direct_coder import generate_code_change
 from orchestrator.agents.deploy.agent import prepare_deployment
 from orchestrator.agents.design.agent import make_design
 from orchestrator.agents.requirement.agent import analyze_requirement
@@ -58,13 +59,34 @@ def make_code_agent_coder(model: BaseChatModel | None = None):
     return coder
 
 
-def build_full_pipeline(repo, *, max_code_retries: int = 2):
-    """Wire the complete real pipeline against the llm_bridge:
-    RequirementAnalyzer + DesignAgent (DeepSeek) → CodeAgent (DeepSeek) →
-    StaticCheck → ReviewAgent (ChatGPT) → VerifyAgent → DeployAgent (PR draft).
+def make_direct_coder():
+    """Return a pipeline Coder backed by the direct whole-file generator.
 
-    Requires both bridge instances running (DeepSeek :8765, ChatGPT :8766).
-    This is what run_autodev.py invokes.
+    This is the DEFAULT coder — real-bridge runs (2026-07-08) showed the
+    deepagents tool-calling coder is unreliable on the browser shim (weak-model
+    JSON, CHATGPT_ERROR), while direct whole-file generation works (verified:
+    ChatGPT generated a correct `multiply` that passed tests). See
+    orchestrator/agents/code/direct_coder.py.
+    """
+    async def coder(task: str, repo: str, feedback: str) -> str:
+        result = await generate_code_change(task, repo, feedback=feedback)
+        return result.summary
+
+    return coder
+
+
+def build_full_pipeline(repo, *, max_code_retries: int = 2, use_deep_agent: bool = False):
+    """Wire the complete real pipeline against the llm_bridge:
+    RequirementAnalyzer + DesignAgent (DeepSeek/CODE role) → coder →
+    StaticCheck → ReviewAgent (ChatGPT/REVIEW role) → VerifyAgent → DeployAgent.
+
+    coder defaults to the direct whole-file generator (make_direct_coder) which
+    is reliable on the browser shim. Pass use_deep_agent=True to use the
+    tool-calling deepagents CodeAgent instead (needs a stronger model/bridge).
+
+    Requires bridge instances running for the CODE role (:8765) and, for review,
+    the REVIEW role (:8766) — or point both at one via env vars. This is what
+    run_autodev.py invokes.
     """
     async def _analyzer(task, repo_summary):
         return await analyze_requirement(task, repo_summary)
@@ -78,9 +100,10 @@ def build_full_pipeline(repo, *, max_code_retries: int = 2):
     async def _deployer(task, diff, branch):
         return await prepare_deployment(task, diff, branch)
 
+    coder = make_code_agent_coder() if use_deep_agent else make_direct_coder()
     return build_pipeline(
         repo,
-        coder=make_code_agent_coder(),
+        coder=coder,
         reviewer=_reviewer,
         analyzer=_analyzer,
         designer=_designer,

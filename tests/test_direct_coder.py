@@ -66,3 +66,18 @@ async def test_rejects_sensitive_path(tmp_path):
     result = await generate_code_change("写env", tmp_path, model=_model(out, out), max_fix_rounds=1)
     assert not result.ok
     assert not (tmp_path / ".env").exists()  # path_guard blocked the write
+
+
+@pytest.mark.asyncio
+async def test_normalizes_scraping_blank_lines(tmp_path):
+    # Simulate ChatGPT DOM double-spacing + blank-after-colon artifacts.
+    out = ("<<<FILE calc.py>>>\n"
+           "def add(a: int, b: int) -> int:\n\n    return a + b\n\n\n\n\ndef sub(a, b):\n\n    return a - b\n"
+           "<<<END>>>")
+    result = await generate_code_change("加函数", tmp_path, model=_model(out))
+    assert result.ok
+    text = (tmp_path / "calc.py").read_text(encoding="utf-8")
+    # No blank line right after a colon-header, no run of 3+ blank lines.
+    assert "->  int:\n\n" not in text
+    assert ":\n\n    return" not in text
+    assert "\n\n\n\n" not in text

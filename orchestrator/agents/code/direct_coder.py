@@ -106,6 +106,34 @@ def _gather_context(repo: Path, context_files: list[str] | None) -> str:
     return "\n\n".join(parts)
 
 
+def _normalize_code(text: str) -> str:
+    """Clean up browser-scraping artifacts in generated code.
+
+    ChatGPT's answer is scraped from rendered DOM, which double-spaces lines and
+    can insert a blank line right after a `:`-terminated header. Both are
+    cosmetically ugly (though Python-valid). We strip trailing whitespace, drop a
+    blank line immediately following a colon-header, and collapse 3+ consecutive
+    blank lines to at most 2 (PEP8). Conservative — never touches indented code
+    content, so it can't break structure.
+    """
+    lines = [ln.rstrip() for ln in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    out: list[str] = []
+    blank_run = 0
+    for i, ln in enumerate(lines):
+        if ln == "":
+            prev = out[-1] if out else ""
+            # Drop a blank immediately after a colon-header (def/if/for/class/...).
+            if prev.rstrip().endswith(":"):
+                continue
+            blank_run += 1
+            if blank_run > 2:
+                continue
+        else:
+            blank_run = 0
+        out.append(ln)
+    return "\n".join(out).strip("\n") + "\n"
+
+
 def parse_file_blocks(text: str) -> list[tuple[str, str]]:
     """Extract (relative_path, content) pairs from the model's output."""
     blocks = []
@@ -128,9 +156,7 @@ def _write_blocks(repo: Path, blocks: list[tuple[str, str]]) -> tuple[list[str],
             rejected.append(f"{path}: {exc}")
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
-        if not content.endswith("\n"):
-            content += "\n"
-        target.write_text(content, encoding="utf-8")
+        target.write_text(_normalize_code(content), encoding="utf-8")
         written.append(path)
     return written, rejected
 
