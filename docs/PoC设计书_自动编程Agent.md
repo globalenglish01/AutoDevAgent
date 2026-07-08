@@ -1,6 +1,6 @@
 # 自动编程 Agent（AutoDevAgent）PoC 设计书
 
-- 状态：PoC 设计阶段，未写代码
+- 状态：**Phase 1（地基）已完成并 commit**（2026-07-08，本地 git 仓库，未 push）。骨架测试 `python -m pytest tests/` 2 passed，不需要真实 llm_bridge。Phase 2 及以后尚未开始
 - 定位：与 `TestAgentPythonProject` **完全独立**的新项目（不同代码库、不同产品），部分底层能力从 TestAgent 迁移复用
 - 目标：客户/开发者提一句自然语言需求 → 系统自动完成 **需求分析 → 方案设计 → 编码 → 测试 → 部署**，类似 Claude Code 的全自动编程工具
 - 来源：从 TestAgentPythonProject 会话中衍生的调研结论，日期 2026-07-08
@@ -17,18 +17,20 @@ TestAgent 的 agent 编排骨架（`deepagents.create_deep_agent` + LangGraph + 
 
 ## 2. 从 TestAgent 直接复用的部分
 
+**2026-07-08 Phase 1 已实现，下表按实际落地情况更新**（原计划"整文件复制"的两项在实现时做了必要改造，原因见各行备注）：
+
 | 复用项 | 来源路径 | 复用方式 |
 |---|---|---|
-| Deep Agent 编排范式 | `backend/app/agents/{api,ui,perf,testcase}/agent.py` | 作为模板抄一份骨架，`create_deep_agent(model, tools, backend, ...)` 这套调用方式直接搬 |
-| 多 Provider 模型工厂 | `backend/app/agents/_utils/model_factory.py` | 整文件复制；关键是 `build_model(agent_name, model_id="browser:deepseek")` / `build_model(agent_name, model_id="browser:chatgpt")` 这种**显式指定 provider** 的用法——不是 fallback 关系，而是给不同 Agent **固定绑定**不同垫片，落地第 3.1 节的"DeepSeek 主写 + ChatGPT 专职审"分工 |
-| 单次运行隔离工作区 | `backend/app/agents/_utils/workspace.py` | `create_run_workspace()` 的"每次运行开一个独立目录 + FilesystemBackend virtual_mode"思路直接复用——这正好是"不能让 agent 改到不该改的文件"的第一道防线 |
-| Checkpointer / 断点续跑 | `backend/app/agents/_utils/checkpointer.py` | 长任务（分析→设计→编码→测试是个长链路）需要能中断恢复，直接复用 |
-| Human-in-the-loop 中断 | `backend/app/agents/_utils/hitl.py` | 复用为"部署前必须人工审批"的机制（见第 5 节安全设计） |
-| Token/成本追踪 | `backend/app/agents/_callbacks/usage_tracker.py`、`tool_tracker` | 直接复用，跑起来就知道一次"自动编程"任务花了多少 token |
-| Budget 中间件 | `backend/app/agents/_middleware/` | 复用"超预算自动降级/中止"逻辑 |
-| MCP 工具服务器骨架 | `backend/mcp/api/src/`（config/tools/index.js 结构） | 作为新建 `code-mcp` 服务器的项目结构模板，不复用其内容（内容是 API 测试专用工具） |
-| 本地免费 LLM 垫片（可选） | `backend/llm_bridge/`（gitignore 独立仓库） | 如果 AutoDevAgent 也要"零成本本地跑"，可以指向同一个 bridge（`browser:deepseek` provider），但天花板问题见第 7 节 |
-| CapabilityOS 文档纪律（可选） | `capability_os/knowledge/` 的 capability-index + incidents 模式 | 建议 AutoDevAgent 从第一天就采用同样的"能力先查后写、bug 先查 incident"纪律，避免重蹈覆辙 |
+| Deep Agent 编排范式 | `backend/app/agents/{api,ui,perf,testcase}/agent.py` | 抄了骨架，`create_deep_agent(model, system_prompt, backend, checkpointer, ...)` 这套调用方式直接搬，已在 `orchestrator/agents/hello_world/agent.py` 跑通 |
+| 多 Provider 模型工厂 | `backend/app/agents/_utils/model_factory.py` | **未整文件复制，改造为 HTTP 版**：TestAgent 原文件的 `browser:` provider 是进程内 `sys.path` 注入直接 import TestAgent 的 `backend/local_llm/`，这会让 AutoDevAgent 依赖 TestAgent 的目录结构，违反"完全独立"。改造后的 `orchestrator/_utils/model_factory.py` 用 `langchain_openai.ChatOpenAI` 直接打 `llm_bridge` 暴露的 OpenAI 兼容 HTTP `/v1` 接口——两个项目只共享"正在运行的服务"，不共享代码。`ModelRole.CODE`/`ModelRole.REVIEW` 两个角色各自绑定固定 bridge 端口，落地第 3.1 节"DeepSeek 主写 + ChatGPT 专职审"分工，已验证两个角色解析到正确的 URL |
+| 单次运行隔离工作区 | `backend/app/agents/_utils/workspace.py` | 原样移植，`create_run_workspace()` 的隔离目录 + `FilesystemBackend virtual_mode` 思路直接复用，已在 hello_world agent 里验证：agent 通过内置 `read_file` 工具能读到、且只能读到隔离目录内的文件 |
+| Checkpointer / 断点续跑 | `backend/app/agents/_utils/checkpointer.py` | **改造**：TestAgent 原文件用 `AsyncPostgresSaver`，依赖 Alembic 042/044 建的表，AutoDevAgent 目前没有 Postgres。Phase 1 改用 `langgraph.checkpoint.memory.InMemorySaver`，`get_checkpointer()` 接口不变，以后要跨进程/跨重启续跑时只需换这一个文件的实现 |
+| Human-in-the-loop 中断 | `backend/app/agents/_utils/hitl.py` | 原样移植，留给后面 DeployAgent 的"部署前必须人工审批"用（见第 5 节），Phase 1 hello world 暂未触发 |
+| Token/工具调用追踪 | `backend/app/agents/_callbacks/usage_tracker.py`、`tool_tracker.py` | **改造**：逻辑结构照搬，但持久化目标从 MongoDB 换成本地 JSONL（`.autodev_logs/`）——本项目没有数据库，且不调用付费 API，没有真实成本需要估算。**踩坑记录**：`tool_tracker` 必须用 `agent.with_config({"callbacks": [get_tool_handler(name)]})` 在 graph 级别注册才对 LangGraph `ToolNode` 生效，挂在 `model.callbacks` 上不起作用——这是抄 TestAgent 源码注释才发现的，已在 `hello_world/agent.py` 按此模式接对，并有测试覆盖 |
+| Budget 中间件 | `backend/app/agents/_middleware/` | 尚未移植——Phase 1 hello world 没有真实的多轮预算问题，留到需要 shell.exec 超时/重试上限时（第 5 节安全设计）再引入 |
+| MCP 工具服务器骨架 | `backend/mcp/api/src/`（config/tools/index.js 结构） | 作为新建 `code-mcp` 服务器的项目结构模板，Phase 2 才开始，不复用其内容 |
+| 本地免费 LLM 垫片 | `backend/llm_bridge/`（gitignore 独立仓库） | 已确认使用（第 7 节），AutoDevAgent 通过 HTTP 指向其 `start_llm_proxy.py` 暴露的两个端口实例，而非 import 其 Python 源码 |
+| CapabilityOS 文档纪律（可选） | `capability_os/knowledge/` 的 capability-index + incidents 模式 | 尚未引入，Phase 1 规模还小，暂不需要 |
 
 **不复用**：`app/api/v2/*`、`app/models/*`、`app/schemas/*`、UI 的 Next.js 页面——这些都是 TestAgent 的业务代码（测试用例管理），跟"自动编程"无关。
 
