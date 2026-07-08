@@ -1,0 +1,20 @@
+# Core agent orchestration — versions pinned to what's already installed and
+# verified working (see tests/test_hello_world.py) in this dev environment,
+# which also runs TestAgentPythonProject/backend.
+deepagents>=0.6.11
+langgraph>=1.2.6
+langchain>=1.3.10
+langchain-core>=1.4.8
+
+# HTTP client to the llm_bridge OpenAI-compatible proxy (both DeepSeek and
+# ChatGPT bridge roles speak this protocol — see orchestrator/_utils/model_factory.py)
+langchain-openai>=1.3.2
+
+# Static checks — StaticCheck stage (Phase 2), Python-only for now per
+# docs/PoC设计书_自动编程Agent.md section 3.2 (2026-07-08 decision)
+ruff>=0.15.18
+mypy>=2.1.0
+
+# Tests
+pytest>=9.1.1
+pytest-asyncio>=1.4.0

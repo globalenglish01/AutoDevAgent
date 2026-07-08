@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.autodev_logs/
+orchestrator/agents/*/workspace_runs/
+.venv/
+*.egg-info/
