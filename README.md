@@ -4,7 +4,20 @@
 
 与 `D:\TestAgentPythonProject` **完全独立**的新项目：不同代码库、不同产品目标（通用编码 Agent，而非测试管理 SaaS）。部分底层能力（agent 编排范式、模型工厂、工作区隔离、checkpointer、HITL、成本/工具调用追踪）从 TestAgent 移植/改造而来，两个项目之间只共享**正在运行的 llm_bridge 服务**，不共享 Python 源码或 import 路径。
 
-## 当前进度：Phase 1（地基）
+## 当前进度：Phase 1（地基）+ Phase 2（code 工具）已完成
+
+远程：https://github.com/globalenglish01/AutoDevAgent 。全套测试 `python -m pytest tests/` **21 passed**（Phase 2 的 18 个工具测试真实跑 ruff/mypy/git，非 mock）。
+
+### Phase 2 新增（`orchestrator/tools/` + `orchestrator/agents/code/`）
+
+原设计计划把代码操作工具做成独立 Node.js MCP 服务器（`code-mcp`），实现时改成 **Python 进程内原生工具**——因为 `fs.*` 已由 deepagents 内置提供，而 git/ruff/mypy 本就是 Python/CLI 工具，套 Node 进程纯亏（详见设计文档 3.2 节）。Node.js 独立进程模式留给 Phase 5 的 `shell.exec` 沙箱。
+
+- `tools/path_guard.py`：写路径守卫，拒绝路径穿越 + 拒绝 `.env`/`*.pem`/`id_rsa` 等敏感文件
+- `tools/staticcheck.py`：**StaticCheck 三工具**（Python only）——`syntax_check`(compileall)/`lint_check`(ruff)/`typecheck_run`(mypy)
+- `tools/git_tools.py`：`git_status`/`git_diff`/`git_create_branch`(拒 main/master)/`git_commit`(暂存到敏感文件时拒绝并撤回)
+- `agents/code/agent.py`：**CodeAgent 骨架**，把上述工具 + deepagents 内置 fs 工具接入 `create_deep_agent`，绑定真实目标仓库
+
+### Phase 1（地基）
 
 已完成：
 - `orchestrator/_utils/` —— 从 TestAgent 移植/改造的编排工具：
