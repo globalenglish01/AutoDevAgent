@@ -10,6 +10,11 @@ from pathlib import Path
 from langchain_core.language_models import BaseChatModel
 
 from orchestrator.agents.code.agent import build_code_agent
+from orchestrator.agents.deploy.agent import prepare_deployment
+from orchestrator.agents.design.agent import make_design
+from orchestrator.agents.requirement.agent import analyze_requirement
+from orchestrator.agents.review.agent import review_diff
+from orchestrator.pipeline.graph import build_pipeline
 
 _TASK_TEMPLATE = """开发任务：
 {task}
@@ -51,3 +56,34 @@ def make_code_agent_coder(model: BaseChatModel | None = None):
         return content or "(code agent produced no summary)"
 
     return coder
+
+
+def build_full_pipeline(repo, *, max_code_retries: int = 2):
+    """Wire the complete real pipeline against the llm_bridge:
+    RequirementAnalyzer + DesignAgent (DeepSeek) → CodeAgent (DeepSeek) →
+    StaticCheck → ReviewAgent (ChatGPT) → VerifyAgent → DeployAgent (PR draft).
+
+    Requires both bridge instances running (DeepSeek :8765, ChatGPT :8766).
+    This is what run_autodev.py invokes.
+    """
+    async def _analyzer(task, repo_summary):
+        return await analyze_requirement(task, repo_summary)
+
+    async def _designer(clarified, criteria, repo_summary):
+        return await make_design(clarified, criteria, repo_summary)
+
+    async def _reviewer(diff, task):
+        return await review_diff(diff=diff, task=task)
+
+    async def _deployer(task, diff, branch):
+        return await prepare_deployment(task, diff, branch)
+
+    return build_pipeline(
+        repo,
+        coder=make_code_agent_coder(),
+        reviewer=_reviewer,
+        analyzer=_analyzer,
+        designer=_designer,
+        deployer=_deployer,
+        max_code_retries=max_code_retries,
+    )
