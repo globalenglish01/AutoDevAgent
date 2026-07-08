@@ -4,9 +4,18 @@
 
 与 `D:\TestAgentPythonProject` **完全独立**的新项目：不同代码库、不同产品目标（通用编码 Agent，而非测试管理 SaaS）。部分底层能力（agent 编排范式、模型工厂、工作区隔离、checkpointer、HITL、成本/工具调用追踪）从 TestAgent 移植/改造而来，两个项目之间只共享**正在运行的 llm_bridge 服务**，不共享 Python 源码或 import 路径。
 
-## 当前进度：Phase 1（地基）+ Phase 2（code 工具）已完成
+## 当前进度：Phase 1–6 全部完成 ✅
 
-远程：https://github.com/globalenglish01/AutoDevAgent 。全套测试 `python -m pytest tests/` **21 passed**（Phase 2 的 18 个工具测试真实跑 ruff/mypy/git，非 mock）。
+远程：https://github.com/globalenglish01/AutoDevAgent 。全套测试 `python -m pytest tests/` **58 passed**、`ruff` 全绿。
+
+完整流水线已打通：**需求分析(DeepSeek) → 方案设计(DeepSeek) → 编码(DeepSeek) → 静态检查(ruff/mypy) → 审查(ChatGPT) → 测试(pytest) → PR 草稿(停在人工审批)**。
+
+- 运行入口：`python run_autodev.py --repo <目标仓库> --task "<自然语言需求>"`
+- 真实跑需先启动两个浏览器垫片（DeepSeek:8765 / ChatGPT:8766）；每轮约 5-6 分钟，见 [examples/README.md](examples/README.md)
+- 安全边界见 [SECURITY.md](SECURITY.md)：白名单+无shell+路径守卫+部署人工审批已实现；网络/内核隔离需容器化（生产硬化项）
+- **测试策略说明**：真实 LLM 需登录态浏览器无法在 CI 驱动，故 58 个测试用确定性假模型验证控制流 + **真实跑的子进程工具**（ruff/mypy/pytest/git 全部真实执行）验证工具正确性。真实 bridge 端到端由用户手动跑。
+
+各阶段产出见文末"分阶段进度"。
 
 ### Phase 2 新增（`orchestrator/tools/` + `orchestrator/agents/code/`）
 

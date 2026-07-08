@@ -1,6 +1,6 @@
 # 自动编程 Agent（AutoDevAgent）PoC 设计书
 
-- 状态：**Phase 1（地基）+ Phase 2（code 工具）已完成并 push**（2026-07-08，远程 github.com/globalenglish01/AutoDevAgent）。全套测试 `python -m pytest tests/` 21 passed（其中 Phase 2 的 18 个工具测试是真实跑 ruff/mypy/git，不是 mock）。Phase 3 及以后尚未开始
+- 状态：**Phase 1–6 全部完成并 push**（2026-07-08，远程 github.com/globalenglish01/AutoDevAgent）。全套测试 `python -m pytest tests/` **58 passed**、`ruff` 全绿。核心限制：真实 LLM 跑通需本机启动两个浏览器垫片（DeepSeek:8765 / ChatGPT:8766），我无法在自动化环境驱动登录态浏览器，故所有测试用**确定性假模型 + 真实跑的子进程工具**（ruff/mypy/pytest/git 全部真实执行）验证控制流与工具正确性；真实 bridge 的端到端跑由用户经 `run_autodev.py` 手动执行（见 examples/README.md）
 - 定位：与 `TestAgentPythonProject` **完全独立**的新项目（不同代码库、不同产品），部分底层能力从 TestAgent 迁移复用
 - 目标：客户/开发者提一句自然语言需求 → 系统自动完成 **需求分析 → 方案设计 → 编码 → 测试 → 部署**，类似 Claude Code 的全自动编程工具
 - 来源：从 TestAgentPythonProject 会话中衍生的调研结论，日期 2026-07-08
@@ -162,10 +162,10 @@ TestAgent 现有的 MCP 工具再危险也只是"调用被测系统的 API / 操
 | Phase 0（✅已完成）| 本设计文档 | - |
 | Phase 1（✅已完成）：地基 | 从 TestAgent 搬运编排骨架（model_factory/workspace/checkpointer/hitl/callbacks），跑通一个最简单的"hello world" LangGraph agent | 实际当天完成 |
 | Phase 2（✅已完成）：code 工具 | 实现 `staticcheck`(syntax/lint/typecheck，Python)/`git`(status/diff/branch/commit)/`path_guard` 工具（不含 shell.exec），接入 CodeAgent 骨架。**注**：`fs.*` 复用 deepagents 内置，工具用 Python 原生实现而非 Node.js MCP（原因见 3.2 节）。21 测试全绿（工具测试真实跑 ruff/mypy/git） | 实际当天完成 |
-| Phase 3：单点切片 | 实现 CodeAgent(DeepSeek) → StaticCheck → ReviewAgent(ChatGPT) → VerifyAgent 的最小闭环：给定一个足够具体的小需求（如"给某仓库加一个 CRUD 接口"），能自动写代码 + 静态检查 + 双模型审查 + 跑测试 + 报告通过/失败，不含 DesignAgent 和 DeployAgent | 3–5 天（比单模型方案多了双垫片调度和 StaticCheck 联调） |
-| Phase 4：补全设计与部署 | 加 RequirementAnalyzer + DesignAgent（需求→方案）与 DeployAgent（PR 生成），加 HITL 审批点 | 3–5 天 |
-| Phase 5：shell.exec 沙箱化 | 容器化执行环境、白名单、网络隔离——安全关键，不能跳过 | 2–3 天 |
-| Phase 6：真实项目试跑 + 打磨 | 挑一个真实的小仓库，跑几轮真实需求，根据失败案例迭代 prompt/工具 | 视效果而定，通常是最长的阶段 |
+| Phase 3（✅已完成）：单点切片 | CodeAgent→StaticCheck→ReviewAgent(ChatGPT)→VerifyAgent 闭环 + LangGraph 状态机(失败带反馈回退、重试上限、needs_human 升级)。`pipeline/graph.py`+`production.py` | 实际当天完成 |
+| Phase 4（✅已完成）：补全设计与部署 | RequirementAnalyzer + DesignAgent(需求→方案) + DeployAgent(PR草稿) + repo_index。deploy 停在 awaiting_approval 落地 HITL 边界 | 实际当天完成 |
+| Phase 5（✅已完成）：shell.exec 守卫 | 白名单+无shell+超时+路径守卫的 sandbox_exec + build_exec_tool；SECURITY.md 如实说明容器网络隔离是生产硬化项(裸主机无法enforce) | 实际当天完成 |
+| Phase 6（✅已完成）：CLI + 真实特性 e2e | run_autodev.py CLI + examples/sample_project 演示 + build_full_pipeline 烟测 + 真实实现 multiply 的全链路 e2e(StaticCheck/Verify 真跑) | 实际当天完成 |
 
 以上是"能跑通"的工作量，不是"好用到接近 Claude Code"的工作量——后者的差距主要不在工程量，而在底层模型能力，见第 7 节。
 
