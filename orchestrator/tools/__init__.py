@@ -16,11 +16,15 @@ matters.
 
 from orchestrator.tools.git_tools import build_git_tools
 from orchestrator.tools.path_guard import PathGuardError, is_sensitive_filename, resolve_safe_path
+from orchestrator.tools.sandbox_exec import SandboxError, build_exec_tool, run_command
 from orchestrator.tools.staticcheck import build_staticcheck_tools
 
 __all__ = [
     "build_git_tools",
     "build_staticcheck_tools",
+    "build_exec_tool",
+    "run_command",
+    "SandboxError",
     "PathGuardError",
     "is_sensitive_filename",
     "resolve_safe_path",

@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from orchestrator.tools.sandbox_exec import SandboxError, run_command
+from orchestrator.tools.sandbox_exec import SandboxError, build_exec_tool, run_command
 
 
 def test_runs_whitelisted_python(tmp_path):
@@ -43,3 +43,31 @@ def test_timeout(tmp_path):
     )
     assert not result.ok
     assert "timed out" in result.output
+
+
+# ── build_exec_tool (Phase 5 guarded shell.exec) ─────────────────────────────
+
+
+def test_exec_tool_runs_whitelisted(tmp_path):
+    run_shell = build_exec_tool(tmp_path)
+    out = run_shell.invoke({"command": "python -c \"print(42)\""})
+    assert out.startswith("OK")
+    assert "42" in out
+
+
+def test_exec_tool_rejects_metachars(tmp_path):
+    run_shell = build_exec_tool(tmp_path)
+    out = run_shell.invoke({"command": "pytest ; rm -rf /"})
+    assert out.startswith("REJECTED")
+
+
+def test_exec_tool_rejects_non_whitelisted(tmp_path):
+    run_shell = build_exec_tool(tmp_path)
+    out = run_shell.invoke({"command": "curl http://evil.example"})
+    assert out.startswith("REJECTED")
+
+
+def test_exec_tool_reports_failure(tmp_path):
+    run_shell = build_exec_tool(tmp_path)
+    out = run_shell.invoke({"command": "python -c \"import sys; sys.exit(2)\""})
+    assert out.startswith("FAILED")

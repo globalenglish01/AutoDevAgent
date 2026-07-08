@@ -20,12 +20,27 @@ IMPORTANT — what this does and does NOT protect against:
 """
 from __future__ import annotations
 
+import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_TIMEOUT_SECONDS = 300
 _MAX_OUTPUT_CHARS = 6000
+
+# Shell control tokens. We never use shell=True, so these are already inert
+# (passed as literal argv to the program), but we reject them as standalone
+# tokens so an agent can't believe it chained commands — and as defense-in-depth.
+# Checked per-token AFTER shlex.split, so a ";" inside a quoted string (e.g.
+# python -c "import sys; sys.exit(1)") is fine — only a bare ";" token is not.
+_SHELL_CONTROL_TOKENS = {";", "|", "&", "&&", "||", ">", ">>", "<", "`"}
+
+
+def _has_control_token(argv: list[str]) -> bool:
+    return any(
+        tok in _SHELL_CONTROL_TOKENS or tok.startswith((">", "<", "|", "&", "`"))
+        for tok in argv
+    )
 
 # Only these programs may be executed. Keep this list tight — every addition is
 # a new way for an agent to affect the host.
@@ -117,3 +132,47 @@ def run_command(
 
     combined = (proc.stdout or "") + (proc.stderr or "")
     return ExecResult(ok=proc.returncode == 0, exit_code=proc.returncode, output=_truncate(combined))
+
+
+def build_exec_tool(workspace_root: Path | str, timeout: int = DEFAULT_TIMEOUT_SECONDS):
+    """Build a guarded shell.exec agent tool bound to *workspace_root*.
+
+    This is the design-section-5 `shell.exec`: controlled command execution
+    exposed to an LLM. It splits the command string, rejects shell
+    metacharacters, and runs through run_command (whitelist + no-shell +
+    timeout + workspace cwd). Returns a LangChain tool.
+    """
+    from langchain_core.tools import tool
+
+    root = Path(workspace_root).resolve()
+
+    @tool
+    def run_shell(command: str) -> str:
+        """Run a build/test/package command in the project workspace.
+
+        Only whitelisted programs are allowed (python, pytest, pip, npm, node,
+        git, ruff, mypy, ...). Command chaining / redirection (; | & > <) is
+        rejected — run one command per call. Returns exit status + output.
+        """
+        try:
+            # posix=True gives correct quote handling; commands are simple
+            # build/test invocations (`python -m pytest`, `npm test`) without
+            # backslash exe paths, so backslash-as-escape is not a concern here.
+            argv = shlex.split(command)
+        except ValueError as exc:
+            return f"REJECTED: could not parse command: {exc}"
+        if not argv:
+            return "REJECTED: empty command"
+        if _has_control_token(argv):
+            return (
+                "REJECTED: command chaining/redirection not allowed "
+                "(one command per call, no ; | & > < ` as separate tokens)."
+            )
+        try:
+            result = run_command(argv, cwd=root, timeout=timeout)
+        except SandboxError as exc:
+            return f"REJECTED: {exc}"
+        status = "OK" if result.ok else f"FAILED (exit {result.exit_code})"
+        return f"{status}\n{result.output}"
+
+    return run_shell

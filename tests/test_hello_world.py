@@ -16,6 +16,10 @@ import pytest
 from langchain_core.language_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
 
+from orchestrator._utils.checkpointer import reset_checkpointer
+from orchestrator._utils.workspace import cleanup_run_workspace
+from orchestrator.agents.hello_world.agent import build_hello_world_agent
+
 
 class _ToolCapableFakeChatModel(GenericFakeChatModel):
     """GenericFakeChatModel doesn't implement bind_tools (raises
@@ -25,10 +29,6 @@ class _ToolCapableFakeChatModel(GenericFakeChatModel):
 
     def bind_tools(self, tools, *, tool_choice=None, **kwargs):
         return self
-
-from orchestrator._utils.checkpointer import reset_checkpointer
-from orchestrator._utils.workspace import cleanup_run_workspace
-from orchestrator.agents.hello_world.agent import build_hello_world_agent
 
 
 @pytest.fixture(autouse=True)
