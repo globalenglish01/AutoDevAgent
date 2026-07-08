@@ -105,3 +105,44 @@ async def test_full_pipeline_escalates_without_deploy(tmp_path):
 
     assert result["status"] == "needs_human"
     assert not deployed["called"]  # deploy never runs when gates fail
+
+
+@pytest.mark.asyncio
+async def test_empty_code_change_does_not_false_succeed(tmp_path):
+    """Regression (real-run 2026-07-08): a code step that produces NO changes
+    must not sail through staticcheck/review/verify to awaiting_approval. It
+    must retry and, if still empty, escalate to needs_human."""
+    repo = _init_repo(tmp_path)
+    (tmp_path / "existing.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "add", "-A"],
+                   cwd=tmp_path, capture_output=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "seed"],
+                   cwd=tmp_path, capture_output=True)
+
+    async def analyzer(task, repo_summary):
+        return Requirements(clarified_task=task)
+
+    async def designer(clarified, criteria, repo_summary):
+        return Design(summary="x")
+
+    async def coder(task, repo_path, feedback):
+        return "我明白了但没有真正改任何文件"  # produces no diff
+
+    deployed = {"called": False}
+
+    async def reviewer(diff, task):
+        return ReviewVerdict(approved=True, issues=[])
+
+    async def deployer(task, diff, branch):
+        deployed["called"] = True
+        return Deployment(pr_title="x", pr_body="y")
+
+    pipeline = build_pipeline(
+        repo, coder=coder, reviewer=reviewer,
+        analyzer=analyzer, designer=designer, deployer=deployer,
+        max_code_retries=1,
+    )
+    result = await pipeline.ainvoke({"task": "加个函数"})
+
+    assert result["status"] == "needs_human"   # NOT awaiting_approval
+    assert not deployed["called"]              # never drafted a PR for a no-op

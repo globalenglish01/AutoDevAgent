@@ -51,6 +51,7 @@ class PipelineState(TypedDict, total=False):
     feedback: str
     diff: str
     code_summary: str
+    code_made_changes: bool
     staticcheck_ok: bool
     staticcheck_report: str
     review_approved: bool
@@ -163,6 +164,7 @@ def build_pipeline(
             "code_summary": summary,
             "diff": diff,
             "branch": branch,
+            "code_made_changes": bool(diff.strip()),
             "log": [*state.get("log", []), f"code: {summary[:120]}"],
         }
 
@@ -215,6 +217,11 @@ def build_pipeline(
 
     async def bump_retry_node(state: PipelineState) -> PipelineState:
         parts = []
+        if not state.get("code_made_changes", True):
+            parts.append(
+                "上一轮没有产生任何代码改动。请务必用 <<<FILE 相对路径>>> ... <<<END>>> 的格式"
+                "输出需要新增/修改文件的**完整内容**，不要只用文字描述。"
+            )
         if not state.get("staticcheck_ok", True):
             parts.append("静态检查未通过：\n" + state.get("staticcheck_report", ""))
         if not state.get("review_approved", True) and state.get("review_issues"):
@@ -231,6 +238,14 @@ def build_pipeline(
     # ── routing ──────────────────────────────────────────────────────────────
     def _bounce(state: PipelineState) -> str:
         return "escalate" if state.get("code_retries", 0) >= max_code_retries else "retry"
+
+    def after_code(state: PipelineState) -> str:
+        # A code step that changed nothing is a failure (weak model replied in
+        # prose instead of emitting file blocks) — never let an empty diff sail
+        # through staticcheck/review/verify as a false success.
+        if not state.get("code_made_changes", False):
+            return _bounce(state)
+        return "advance"
 
     def after_staticcheck(state: PipelineState) -> str:
         return "advance" if state.get("staticcheck_ok") else _bounce(state)
@@ -272,7 +287,10 @@ def build_pipeline(
         graph.add_edge("design", "code")
     graph.add_edge("init", first_after_init)
 
-    graph.add_edge("code", "staticcheck")
+    graph.add_conditional_edges(
+        "code", after_code,
+        {"advance": "staticcheck", "retry": "bump_retry", "escalate": "escalate"},
+    )
     graph.add_conditional_edges(
         "staticcheck", after_staticcheck,
         {"advance": "review", "retry": "bump_retry", "escalate": "escalate"},
