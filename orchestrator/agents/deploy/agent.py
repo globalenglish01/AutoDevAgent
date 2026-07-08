@@ -21,6 +21,7 @@ from pathlib import Path
 from langchain_core.language_models import BaseChatModel
 
 from orchestrator._utils.json_extract import extract_json
+from orchestrator._utils.llm_retry import ainvoke_text
 from orchestrator._utils.model_factory import build_code_model
 from orchestrator.tools.sandbox_exec import run_command
 
@@ -60,10 +61,7 @@ async def prepare_deployment(
     if not diff or not diff.strip():
         return Deployment(pr_title=fallback_title, pr_body="(无代码改动)", branch=branch)
     model = model or build_code_model(AGENT_NAME)
-    response = await model.ainvoke(_PROMPT.format(task=task, diff=diff))
-    content = getattr(response, "content", str(response))
-    if isinstance(content, list):
-        content = " ".join(str(c.get("text", c)) if isinstance(c, dict) else str(c) for c in content)
+    content = await ainvoke_text(model, _PROMPT.format(task=task, diff=diff))
     try:
         data = extract_json(content)
         if not isinstance(data, dict):

@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from langchain_core.language_models import BaseChatModel
 
 from orchestrator._utils.json_extract import extract_json
+from orchestrator._utils.llm_retry import ainvoke_text
 from orchestrator._utils.model_factory import build_review_model
 
 AGENT_NAME = "review_agent"
@@ -80,8 +81,5 @@ async def review_diff(diff: str, task: str, model: BaseChatModel | None = None) 
         return ReviewVerdict(approved=True, issues=[], raw="(empty diff)")
     model = model or build_review_model(AGENT_NAME)
     prompt = _REVIEW_PROMPT.format(task=task, diff=diff)
-    response = await model.ainvoke(prompt)
-    content = response.content if hasattr(response, "content") else str(response)
-    if isinstance(content, list):  # some models return content blocks
-        content = " ".join(str(c.get("text", c)) if isinstance(c, dict) else str(c) for c in content)
+    content = await ainvoke_text(model, prompt)
     return _parse_verdict(content)

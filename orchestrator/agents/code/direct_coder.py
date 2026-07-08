@@ -18,7 +18,6 @@ because it degrades gracefully with model quality where tool-calling does not.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
@@ -26,20 +25,12 @@ from pathlib import Path
 
 from langchain_core.language_models import BaseChatModel
 
+from orchestrator._utils.llm_retry import ainvoke_text
 from orchestrator._utils.model_factory import build_code_model
 from orchestrator.tools.path_guard import PathGuardError, resolve_safe_path
 from orchestrator.tools.staticcheck import build_staticcheck_tools
 
 logger = logging.getLogger(__name__)
-
-# Transient browser-bridge errors worth retrying: momentary Playwright/asyncio
-# races, CHATGPT_ERROR blips, navigation/timeout hiccups, 5xx. These are bridge
-# substrate flakiness, not real failures — a short backoff usually clears them.
-_TRANSIENT_MARKERS = (
-    "sync api inside", "asyncio loop", "chatgpt_error", "deepseek",
-    "service_unavailable", "timed out", "timeout", "navigat", "target closed",
-    "503", "500", "502", "504",
-)
 
 AGENT_NAME = "direct_coder"
 
@@ -173,32 +164,9 @@ def _staticcheck(repo: Path, files: list[str]) -> tuple[bool, str]:
     return ok, "\n".join(reports)
 
 
-def _is_transient(exc: Exception) -> bool:
-    msg = str(exc).lower()
-    return any(m in msg for m in _TRANSIENT_MARKERS)
-
-
-async def _ask(model: BaseChatModel, prompt: str, *, max_attempts: int = 3) -> str:
-    """Invoke the model, retrying transient browser-bridge errors with backoff."""
-    last: Exception | None = None
-    for attempt in range(1, max_attempts + 1):
-        try:
-            resp = await model.ainvoke(prompt)
-            content = getattr(resp, "content", str(resp))
-            if isinstance(content, list):
-                content = " ".join(
-                    str(c.get("text", c)) if isinstance(c, dict) else str(c) for c in content
-                )
-            return content
-        except Exception as exc:  # noqa: BLE001
-            last = exc
-            if attempt < max_attempts and _is_transient(exc):
-                logger.warning("[direct_coder] transient bridge error (attempt %d): %s",
-                               attempt, str(exc)[:120])
-                await asyncio.sleep(3 * attempt)
-                continue
-            raise
-    raise last  # unreachable, but keeps type checkers happy
+async def _ask(model: BaseChatModel, prompt: str) -> str:
+    """Invoke the model with shared transient-error retry (see llm_retry)."""
+    return await ainvoke_text(model, prompt)
 
 
 async def generate_code_change(

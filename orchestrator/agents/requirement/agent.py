@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from langchain_core.language_models import BaseChatModel
 
 from orchestrator._utils.json_extract import extract_json
+from orchestrator._utils.llm_retry import ainvoke_text
 from orchestrator._utils.model_factory import build_code_model
 
 AGENT_NAME = "requirement_analyzer"
@@ -53,10 +54,7 @@ async def analyze_requirement(
 ) -> Requirements:
     model = model or build_code_model(AGENT_NAME)
     prompt = _PROMPT.format(task=task, repo_summary=repo_summary or "(无)")
-    response = await model.ainvoke(prompt)
-    content = getattr(response, "content", str(response))
-    if isinstance(content, list):
-        content = " ".join(str(c.get("text", c)) if isinstance(c, dict) else str(c) for c in content)
+    content = await ainvoke_text(model, prompt)
     try:
         data = extract_json(content)
         if not isinstance(data, dict):
