@@ -37,21 +37,40 @@ def _model(text: str) -> GenericFakeChatModel:
 
 
 @pytest.mark.asyncio
-async def test_review_approved():
+async def test_review_approved_keyword():
     verdict = await review_diff(
-        diff="+def f():\n+    return 1\n",
-        task="加一个函数 f",
-        model=_model('{"approved": true, "issues": []}'),
+        diff="+def f():\n+    return 1\n", task="加一个函数 f",
+        model=_model("APPROVE"),
     )
     assert verdict.approved
     assert verdict.issues == []
 
 
 @pytest.mark.asyncio
-async def test_review_changes_requested():
+async def test_review_rejected_keyword():
     verdict = await review_diff(
-        diff="+def div(a,b):\n+    return a/b\n",
-        task="加一个除法函数",
+        diff="+def div(a,b):\n+    return a/b\n", task="加一个除法函数",
+        model=_model("REJECT\n未处理除零\n缺少类型注解"),
+    )
+    assert not verdict.approved
+    assert any("除零" in i for i in verdict.issues)
+    assert len(verdict.issues) == 2
+
+
+@pytest.mark.asyncio
+async def test_review_approved_json_fallback():
+    # Older habit: model still emits JSON — must still work.
+    verdict = await review_diff(
+        diff="+x = 1\n", task="加变量",
+        model=_model('{"approved": true, "issues": []}'),
+    )
+    assert verdict.approved
+
+
+@pytest.mark.asyncio
+async def test_review_rejected_json_fallback():
+    verdict = await review_diff(
+        diff="+def div(a,b):\n+    return a/b\n", task="除法",
         model=_model('{"approved": false, "issues": ["未处理除零"]}'),
     )
     assert not verdict.approved
@@ -63,7 +82,7 @@ async def test_review_unparseable_fails_safe():
     verdict = await review_diff(
         diff="+x = 1\n",
         task="加个变量",
-        model=_model("我觉得挺好的，没问题！"),  # no JSON
+        model=_model("嗯……这段代码我看了看。"),  # no keyword, no JSON
     )
     assert not verdict.approved  # fail-safe: unparseable => not approved
 
