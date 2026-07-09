@@ -23,7 +23,7 @@ import argparse
 import asyncio
 
 from orchestrator.agents.deploy.agent import DeployError, push_feature_branch
-from orchestrator.pipeline.production import build_full_pipeline
+from orchestrator.pipeline.production import build_full_pipeline, build_lite_pipeline
 
 
 def _print_result(result: dict) -> None:
@@ -50,6 +50,10 @@ async def _amain() -> None:
     parser.add_argument("--task", required=True, help="自然语言开发需求")
     parser.add_argument("--max-retries", type=int, default=2, help="编码重试上限")
     parser.add_argument(
+        "--lite", action="store_true",
+        help="精简模式：跳过需求分析/设计，直接编码(推荐用于免费浏览器垫片，更稳)",
+    )
+    parser.add_argument(
         "--approve", metavar="BRANCH", default=None,
         help="人工审批后推送指定 feature 分支（跳过流水线，仅执行 push）",
     )
@@ -63,7 +67,8 @@ async def _amain() -> None:
             print(f"推送失败: {exc}")
         return
 
-    pipeline = build_full_pipeline(args.repo, max_code_retries=args.max_retries)
+    builder = build_lite_pipeline if args.lite else build_full_pipeline
+    pipeline = builder(args.repo, max_code_retries=args.max_retries)
     result = await pipeline.ainvoke({"task": args.task})
     _print_result(result)
 

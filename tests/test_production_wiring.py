@@ -22,3 +22,15 @@ def test_full_pipeline_compiles(tmp_path):
     for expected in {"init", "requirement", "design", "code", "staticcheck",
                      "review", "verify", "deploy"}:
         assert expected in node_names, f"missing node: {expected}"
+
+
+def test_lite_pipeline_compiles(tmp_path):
+    import subprocess
+    from orchestrator.pipeline.production import build_lite_pipeline
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    pipeline = build_lite_pipeline(tmp_path, max_code_retries=2)
+    assert hasattr(pipeline, "ainvoke")
+    node_names = set(pipeline.get_graph().nodes.keys())
+    # Lite mode: code is the entry work; NO requirement/design planning nodes.
+    assert "code" in node_names and "deploy" in node_names
+    assert "requirement" not in node_names and "design" not in node_names

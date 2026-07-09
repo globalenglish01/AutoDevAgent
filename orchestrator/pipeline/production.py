@@ -75,6 +75,33 @@ def make_direct_coder():
     return coder
 
 
+def build_lite_pipeline(repo, *, max_code_retries: int = 2):
+    """Planning-free pipeline for weak/free browser bridges: code → staticcheck
+    → review → verify → deploy. No requirement/design front-end.
+
+    Real-run finding (2026-07-08): on the free ChatGPT bridge the planning stages
+    hurt — they (a) burn 2 calls that degrade the session before code even runs
+    (the bridge's clean copy-button extraction works best on early calls), and
+    (b) feed the weak model a verbose enriched task it tends to answer in prose
+    instead of emitting file blocks. Going straight to code as the FIRST call
+    matches the configuration that succeeded (a correct, test-passing `multiply`).
+    Prefer this over build_full_pipeline when driving a free browser bridge.
+    """
+    async def _reviewer(diff, task):
+        return await review_diff(diff=diff, task=task)
+
+    async def _deployer(task, diff, branch):
+        return await prepare_deployment(task, diff, branch)
+
+    return build_pipeline(
+        repo,
+        coder=make_direct_coder(),
+        reviewer=_reviewer,
+        deployer=_deployer,
+        max_code_retries=max_code_retries,
+    )
+
+
 def build_full_pipeline(repo, *, max_code_retries: int = 2, use_deep_agent: bool = False):
     """Wire the complete real pipeline against the llm_bridge:
     RequirementAnalyzer + DesignAgent (DeepSeek/CODE role) → coder →
