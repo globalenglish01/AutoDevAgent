@@ -146,3 +146,45 @@ async def test_empty_code_change_does_not_false_succeed(tmp_path):
 
     assert result["status"] == "needs_human"   # NOT awaiting_approval
     assert not deployed["called"]              # never drafted a PR for a no-op
+
+
+@pytest.mark.asyncio
+async def test_inconclusive_review_defers_to_verify(tmp_path):
+    """Real-run finding 2026-07-09: a flaky/unreadable review must NOT block
+    correct code — it's marked inconclusive and the pipeline advances to the
+    test gate. Here review is inconclusive but code + tests are good → done."""
+    repo = _init_repo(tmp_path)
+
+    async def coder(task, repo_path, feedback):
+        (tmp_path / "feature.py").write_text("def sq(n):\n    return n * n\n", encoding="utf-8")
+        (tmp_path / "test_feature.py").write_text(
+            "from feature import sq\n\ndef test_sq():\n    assert sq(3) == 9\n", encoding="utf-8")
+        return "wrote sq + test"
+
+    async def reviewer(diff, task):
+        # Simulate the real weak-model behavior: no readable verdict.
+        return ReviewVerdict(approved=False, inconclusive=True, issues=["无法解析"])
+
+    pipeline = build_pipeline(repo, coder=coder, reviewer=reviewer)  # no deployer → ends "done"
+    result = await pipeline.ainvoke({"task": "加平方函数"})
+
+    assert result["staticcheck_ok"]
+    assert result["verify_ok"]           # tests ran and passed
+    assert result["status"] == "done"    # inconclusive review did NOT block
+
+
+@pytest.mark.asyncio
+async def test_explicit_reject_still_bounces(tmp_path):
+    """An EXPLICIT rejection (not inconclusive) must still bounce/escalate."""
+    repo = _init_repo(tmp_path)
+
+    async def coder(task, repo_path, feedback):
+        (tmp_path / "feature.py").write_text("x = 1\n", encoding="utf-8")
+        return "wrote x"
+
+    async def reviewer(diff, task):
+        return ReviewVerdict(approved=False, inconclusive=False, issues=["构造的硬性问题"])
+
+    pipeline = build_pipeline(repo, coder=coder, reviewer=reviewer, max_code_retries=1)
+    result = await pipeline.ainvoke({"task": "加变量"})
+    assert result["status"] == "needs_human"  # explicit reject blocks

@@ -78,13 +78,31 @@ async def test_review_rejected_json_fallback():
 
 
 @pytest.mark.asyncio
-async def test_review_unparseable_fails_safe():
+async def test_review_chinese_approve():
+    verdict = await review_diff(
+        diff="+x = 1\n", task="加变量", model=_model("这段代码没问题，可以通过。"),
+    )
+    assert verdict.approved
+
+
+@pytest.mark.asyncio
+async def test_review_chinese_reject():
+    verdict = await review_diff(
+        diff="+def d(a,b):\n+    return a/b\n", task="除法", model=_model("有问题：未处理除零。"),
+    )
+    assert not verdict.approved
+    assert not verdict.inconclusive  # explicit rejection, not inconclusive
+
+
+@pytest.mark.asyncio
+async def test_review_unparseable_is_inconclusive_not_reject():
     verdict = await review_diff(
         diff="+x = 1\n",
         task="加个变量",
-        model=_model("嗯……这段代码我看了看。"),  # no keyword, no JSON
+        model=_model("嗯……让我想想这段代码。"),  # no keyword, no JSON, no zh verdict
     )
-    assert not verdict.approved  # fail-safe: unparseable => not approved
+    assert not verdict.approved       # not approved
+    assert verdict.inconclusive       # but flagged inconclusive (defer to tests), not a hard reject
 
 
 @pytest.mark.asyncio

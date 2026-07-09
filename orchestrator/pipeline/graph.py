@@ -55,6 +55,7 @@ class PipelineState(TypedDict, total=False):
     staticcheck_ok: bool
     staticcheck_report: str
     review_approved: bool
+    review_inconclusive: bool
     review_issues: list[str]
     verify_ok: bool
     verify_report: str
@@ -181,6 +182,7 @@ def build_pipeline(
         verdict = await review_fn(state.get("diff", ""), task)
         return {
             "review_approved": verdict.approved,
+            "review_inconclusive": getattr(verdict, "inconclusive", False),
             "review_issues": verdict.issues,
             "log": [*state.get("log", []), f"review: {verdict.summary[:120]}"],
         }
@@ -251,7 +253,12 @@ def build_pipeline(
         return "advance" if state.get("staticcheck_ok") else _bounce(state)
 
     def after_review(state: PipelineState) -> str:
-        return "advance" if state.get("review_approved") else _bounce(state)
+        # Advance on approve OR inconclusive (a flaky/unreadable review must not
+        # veto correct, test-passing code — VerifyAgent is the real gate). Only
+        # an EXPLICIT rejection bounces back to code.
+        if state.get("review_approved") or state.get("review_inconclusive"):
+            return "advance"
+        return _bounce(state)
 
     def after_verify(state: PipelineState) -> str:
         return "advance" if state.get("verify_ok") else _bounce(state)

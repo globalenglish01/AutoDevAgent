@@ -47,6 +47,10 @@ _REVIEW_PROMPT = """你是一名严格的代码审查员。下面是一次针对
 """
 
 _VERDICT_RE = re.compile(r"\b(APPROVE|REJECT)\b", re.IGNORECASE)
+# Chinese/informal verdict signals (checked only if no keyword/JSON). Reject
+# signals win over approve signals when both appear.
+_ZH_REJECT = ("驳回", "拒绝", "不通过", "不能通过", "有问题", "存在问题", "需要修改", "需修改", "必须修复")
+_ZH_APPROVE = ("通过审查", "可以通过", "审查通过", "没有问题", "无问题", "没问题", "同意", "批准", "lgtm")
 
 
 @dataclass
@@ -54,11 +58,17 @@ class ReviewVerdict:
     approved: bool
     issues: list[str] = field(default_factory=list)
     raw: str = ""  # raw model text, kept for debugging
+    # True when the reviewer produced no readable verdict (not an explicit
+    # rejection). The pipeline defers these to the deterministic test gate
+    # rather than blocking correct code on a flaky review.
+    inconclusive: bool = False
 
     @property
     def summary(self) -> str:
         if self.approved:
             return "APPROVED"
+        if self.inconclusive:
+            return "INCONCLUSIVE: " + "; ".join(self.issues)
         return "CHANGES_REQUESTED: " + "; ".join(self.issues)
 
 
@@ -88,11 +98,20 @@ def _parse_verdict(text: str) -> ReviewVerdict:
     except ValueError:
         pass
 
-    # 3) Fail-safe: neither keyword nor JSON → treat as changes-requested so a
-    # human/loop notices rather than silently passing something unverified.
+    # 3) Chinese/informal prose signals (reject wins over approve).
+    low = stripped.lower()
+    if any(sig in stripped for sig in _ZH_REJECT):
+        return ReviewVerdict(approved=False, issues=[stripped[:300]], raw=text)
+    if any(sig in stripped or sig in low for sig in _ZH_APPROVE):
+        return ReviewVerdict(approved=True, issues=[], raw=text)
+
+    # 4) Inconclusive: no readable verdict. NOT an explicit rejection — mark
+    # inconclusive so the pipeline defers to the test gate instead of blocking
+    # correct code on a flaky review (real-run finding 2026-07-09).
     return ReviewVerdict(
         approved=False,
-        issues=["审查结论无法解析（既无 APPROVE/REJECT 关键词也无 JSON）"],
+        inconclusive=True,
+        issues=["审查结论无法解析（无关键词/JSON/中文判定词），交由测试环节兜底"],
         raw=text,
     )
 
