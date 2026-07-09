@@ -211,9 +211,19 @@ async def generate_code_change(
             )
         # Not ok — build a fix prompt for the next round.
         problems = report + ("\n" + "\n".join(rejected) if rejected else "")
+        # The browser bridge sometimes strips leading indentation when scraping
+        # ChatGPT's rendered code — fatal for Python. Give a pointed instruction
+        # so a re-emit has a better chance of a clean (copy-button) extraction.
+        indent_note = ""
+        low = problems.lower()
+        if "indent" in low or "expected an indented block" in low or "缩进" in problems:
+            indent_note = (
+                "\n⚠️ 检测到缩进错误：函数/类/if/for 等冒号结尾行的下一行必须缩进 4 个空格。"
+                "请重新输出完整文件，务必保留每一行的正确缩进，不要把函数体顶格写。\n"
+            )
         prompt = _PROMPT.format(
             task=task,
-            feedback=f"\n上一轮静态检查未通过，请给出修正后的完整文件：\n{problems}\n",
+            feedback=f"\n上一轮静态检查未通过，请给出修正后的完整文件：\n{problems}\n{indent_note}",
             context=_gather_context(root, context_files),
         )
 
