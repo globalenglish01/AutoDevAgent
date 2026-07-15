@@ -10,7 +10,8 @@
 
 完整流水线已打通：**需求分析(DeepSeek) → 方案设计(DeepSeek) → 编码(DeepSeek) → 静态检查(ruff/mypy) → 审查(ChatGPT) → 测试(pytest) → PR 草稿(停在人工审批)**。
 
-- 运行入口：`python run_autodev.py --repo <目标仓库> --task "<自然语言需求>"`
+- 运行入口（命令行）：`python run_autodev.py --repo <目标仓库> --task "<自然语言需求>"`
+- 运行入口（网页）：`python run_web.py` → 打开 http://127.0.0.1:8770 ，网页里填仓库路径+需求→运行→看流水线实时进度→审批应用（建 feature 分支+提交，有远程则推送）。前置同样要先起 ChatGPT 垫片(8765)。
 - 真实跑需先启动两个浏览器垫片（DeepSeek:8765 / ChatGPT:8766）；每轮约 5-6 分钟，见 [examples/README.md](examples/README.md)
 - 安全边界见 [SECURITY.md](SECURITY.md)：白名单+无shell+路径守卫+部署人工审批已实现；网络/内核隔离需容器化（生产硬化项）
 - **测试策略说明**：真实 LLM 需登录态浏览器无法在 CI 驱动，故 58 个测试用确定性假模型验证控制流 + **真实跑的子进程工具**（ruff/mypy/pytest/git 全部真实执行）验证工具正确性。真实 bridge 端到端由用户手动跑。
